@@ -79,6 +79,16 @@ moved
 The same goes for anything else that counts how far it's scrolled, like the
 line a `Paragraph` starts from.
 
+## Examples
+
+Two small apps to run in a terminal, and to copy from:
+
+- `cargo run --example list` has two lists side by side. The wheel scrolls the
+  one under the pointer, the first by its offset and the second by its
+  selection.
+- `cargo run --example custom` has a widget of its own, a grid bigger than the
+  screen, that the wheel scrolls both ways.
+
 ## Testing
 
 `cargo test` runs the unit tests and the examples in the documentation.
