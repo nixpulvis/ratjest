@@ -1,0 +1,52 @@
+# Build the docs from master and publish them to the root of the gh-pages
+# branch, which GitHub Pages serves at https://nixpulvis.com/ratjest/
+# (Settings > Pages > Deploy from a branch > gh-pages).
+name: Deploy
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # For -Zrustdoc-map, below.
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+
+      # Every feature, as on docs.rs. -Zrustdoc-map links web-sys's items to
+      # docs.rs, at the version in Cargo.lock, as docs.rs does. Without it
+      # they aren't linked at all.
+      - env:
+          CARGO_DOC_EXTERN_MAP_REGISTRIES_CRATES_IO: https://docs.rs/
+        run: cargo doc --locked --no-deps --all-features -Zrustdoc-map
+
+      # rustdoc puts the crate's docs under ratjest/, with nothing at
+      # the root, so send the root there. .nojekyll keeps Pages from running
+      # the files through Jekyll.
+      - name: Add root redirect
+        run: |
+          rm -f target/doc/.lock
+          touch target/doc/.nojekyll
+          cat > target/doc/index.html <<'EOF'
+          <!DOCTYPE html>
+          <meta charset="utf-8">
+          <title>ratjest</title>
+          <meta http-equiv="refresh" content="0; url=ratjest/">
+          <link rel="canonical" href="ratjest/">
+          <a href="ratjest/">ratjest</a>
+          EOF
+
+      - uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: target/doc
+          branch: gh-pages

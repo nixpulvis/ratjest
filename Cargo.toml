@@ -1,0 +1,27 @@
+[package]
+name = "ratjest"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Scroll gestures for terminal UIs, a cell at a time, from wheels, trackpads and touch"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/nixpulvis/ratjest"
+keywords = ["gesture", "scroll", "ratatui", "tui", "wasm"]
+categories = ["command-line-interface", "wasm"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+# Follow a browser's wheel and touch events over the element a view is drawn
+# in, with web-sys, in `web`.
+web = ["dep:wasm-bindgen", "dep:web-sys"]
+
+[dependencies]
+wasm-bindgen = { version = "0.2", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["AddEventListenerOptions", "CssStyleDeclaration", "DomRect", "Element", "EventTarget", "HtmlElement", "Touch", "TouchEvent", "TouchList", "WheelEvent", "Window"] }
+
+[dev-dependencies]
+# Its wheel events, in `terminal::Wheel`'s example.
+crossterm = { version = "0.29", default-features = false, features = ["events"] }
