@@ -24,15 +24,8 @@ use ratjest::terminal::Wheel;
 use ratjest::{Axis, Step};
 
 // Twenty lines in a view five tall, so the top line is 0 through 15.
-let mut top: isize = 0;
-let mut scroll = |step: Step| {
-    if step.axis != Axis::Vertical {
-        return false;
-    }
-    let before = top;
-    top = (top + step.cells).clamp(0, 15);
-    top != before
-};
+let mut top = 0;
+let mut scroll = |step: Step| step.scroll(Axis::Vertical, &mut top, 15);
 // Three lines, or columns, a tick.
 let mut wheel = Wheel::new(3);
 
@@ -57,6 +50,34 @@ events over the element a view is drawn in, like [Ratzilla]'s, with the same
 callback. It needs the size of a cell in CSS pixels, to turn pixels into cells.
 
 Anywhere else that reports movement in pixels, feed `Gestures` from its events.
+
+## Lists and tables
+
+`Step::scroll` moves an offset by a step, from 0 through the last place it can
+be, and says whether it moved. Ratatui's `ListState` and `TableState` each keep
+an offset, the first item drawn, but not how many items there are or how many
+fit, so the app gives the end:
+
+```rust
+// In the callback, for a list drawn in `area`.
+let last = items.len().saturating_sub(usize::from(area.height));
+area.contains((step.column, step.row).into())
+    && step.scroll(Axis::Vertical, state.offset_mut(), last)
+```
+
+A list or a table with an item selected keeps that item in view, whatever its
+offset. There, scroll the selection instead:
+
+```rust
+let last = items.len().saturating_sub(1);
+let mut selected = state.selected().unwrap_or(0);
+let moved = step.scroll(Axis::Vertical, &mut selected, last);
+state.select(Some(selected));
+moved
+```
+
+The same goes for anything else that counts how far it's scrolled, like the
+line a `Paragraph` starts from.
 
 ## Testing
 

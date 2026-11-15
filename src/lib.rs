@@ -9,9 +9,10 @@
 //!
 //! [`Gestures`] does the arithmetic, from pixels and timestamps, and hands
 //! each whole cell of movement to a callback as a [`Step`]. The callback
-//! moves whatever the app scrolls, and returns whether it moved, which ends
-//! the gesture at the end of what there is to scroll. Each host feeds it its
-//! own events:
+//! moves whatever the app scrolls, with [`Step::scroll`] where that's an
+//! offset, like a list's, and returns whether it moved, which ends the
+//! gesture at the end of what there is to scroll. Each host feeds it its own
+//! events:
 //!
 //! - In a terminal, [`terminal::Wheel`] takes the wheel's ticks, like
 //!   crossterm's `MouseEventKind::ScrollDown`.
@@ -28,15 +29,8 @@
 //! use ratjest::{Axis, Gestures, Step};
 //!
 //! // Twenty lines in a view five tall, so the top line is 0 through 15.
-//! let mut top: isize = 0;
-//! let mut scroll = |step: Step| {
-//!     if step.axis != Axis::Vertical {
-//!         return false;
-//!     }
-//!     let before = top;
-//!     top = (top + step.cells).clamp(0, 15);
-//!     top != before
-//! };
+//! let mut top = 0;
+//! let mut scroll = |step: Step| step.scroll(Axis::Vertical, &mut top, 15);
 //!
 //! // Cells 8 pixels wide and 16 tall.
 //! let mut gestures = Gestures::new(8.0, 16.0);
@@ -110,6 +104,66 @@ pub struct Step {
     pub column: u16,
     /// The row of the cell the gesture is over.
     pub row: u16,
+}
+
+impl Step {
+    /// Scrolls `offset` by this step's cells, when it goes `axis`'s way,
+    /// keeping it from 0 through `last`. Returns whether it moved, which it
+    /// doesn't the other way, or at either end.
+    ///
+    /// An offset is how far something is scrolled: the line at the top of
+    /// some text, the first row drawn of a table, the column a wide line
+    /// starts from. [Ratatui]'s `ListState` and `TableState` each keep one,
+    /// the index of the first item drawn. They don't know how many items
+    /// there are, or how many fit, so the app says where the end is:
+    ///
+    /// ```
+    /// use ratatui::layout::Rect;
+    /// use ratatui::widgets::ListState;
+    /// use ratjest::{Axis, Step};
+    ///
+    /// // Twenty items in a list five rows tall.
+    /// let items = 20;
+    /// let area = Rect::new(0, 0, 30, 5);
+    /// let mut state = ListState::default();
+    /// let last = items - usize::from(area.height);
+    ///
+    /// // In a `Wheel`'s or `web::listen`'s callback.
+    /// # let step = Step { axis: Axis::Vertical, cells: 3, column: 4, row: 2 };
+    /// let moved = area.contains((step.column, step.row).into())
+    ///     && step.scroll(Axis::Vertical, state.offset_mut(), last);
+    /// assert!(moved);
+    /// assert_eq!(state.offset(), 3);
+    /// ```
+    ///
+    /// A list or a table with an item selected keeps that item in view,
+    /// whatever its offset, so scroll the selection instead, through the
+    /// last item:
+    ///
+    /// ```
+    /// use ratatui::widgets::TableState;
+    /// use ratjest::{Axis, Step};
+    ///
+    /// let rows = 20;
+    /// let mut state = TableState::default().with_selected(18);
+    ///
+    /// # let step = Step { axis: Axis::Vertical, cells: 3, column: 4, row: 2 };
+    /// let mut selected = state.selected().unwrap_or(0);
+    /// let moved = step.scroll(Axis::Vertical, &mut selected, rows - 1);
+    /// state.select(Some(selected));
+    /// assert!(moved);
+    /// assert_eq!(state.selected(), Some(19));
+    /// ```
+    ///
+    /// [Ratatui]: https://ratatui.rs
+    pub fn scroll(self, axis: Axis, offset: &mut usize, last: usize) -> bool {
+        if self.axis != axis {
+            return false;
+        }
+        let before = *offset;
+        *offset = before.saturating_add_signed(self.cells).min(last);
+        *offset != before
+    }
 }
 
 /// Turns wheel and touch movement, in pixels, into [`Step`]s of whole
@@ -312,6 +366,34 @@ mod tests {
 
     fn cells(steps: &[Step]) -> Vec<(Axis, isize)> {
         steps.iter().map(|s| (s.axis, s.cells)).collect()
+    }
+
+    #[test]
+    fn steps_scroll_offsets_their_way_to_the_ends() {
+        let step = |axis, cells| Step {
+            axis,
+            cells,
+            column: 0,
+            row: 0,
+        };
+        let mut offset = 2;
+        assert!(step(Axis::Vertical, 5).scroll(Axis::Vertical, &mut offset, 10));
+        assert_eq!(offset, 7);
+        // Not the other way.
+        assert!(!step(Axis::Horizontal, 1).scroll(Axis::Vertical, &mut offset, 10));
+        assert_eq!(offset, 7);
+        // Only as far as the end, and not past it.
+        assert!(step(Axis::Vertical, 5).scroll(Axis::Vertical, &mut offset, 10));
+        assert!(!step(Axis::Vertical, 1).scroll(Axis::Vertical, &mut offset, 10));
+        assert_eq!(offset, 10);
+        // Or the start.
+        assert!(step(Axis::Vertical, -20).scroll(Axis::Vertical, &mut offset, 10));
+        assert!(!step(Axis::Vertical, -1).scroll(Axis::Vertical, &mut offset, 10));
+        assert_eq!(offset, 0);
+        // An offset left past a shorter end comes back to it.
+        let mut offset = 12;
+        assert!(step(Axis::Vertical, -1).scroll(Axis::Vertical, &mut offset, 10));
+        assert_eq!(offset, 10);
     }
 
     #[test]

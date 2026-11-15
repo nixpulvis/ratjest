@@ -37,15 +37,8 @@ use crate::{Gestures, Step};
 /// }
 ///
 /// // Twenty lines in a view five tall, so the top line is 0 through 15.
-/// let mut top: isize = 0;
-/// let mut scroll = |step: Step| {
-///     if step.axis != Axis::Vertical {
-///         return false;
-///     }
-///     let before = top;
-///     top = (top + step.cells).clamp(0, 15);
-///     top != before
-/// };
+/// let mut top = 0;
+/// let mut scroll = |step: Step| step.scroll(Axis::Vertical, &mut top, 15);
 /// // Three lines, or columns, a tick.
 /// let mut wheel = Wheel::new(3);
 ///

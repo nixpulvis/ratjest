@@ -38,12 +38,10 @@ use crate::{Gestures, Step};
 /// let cell = (f64::from(width), f64::from(height));
 /// let scrolled = top.clone();
 /// ratjest::web::listen(&screen, cell, move |step| {
-///     if step.axis != Axis::Vertical {
-///         return false;
-///     }
-///     let before = scrolled.get();
-///     scrolled.set((before + step.cells).clamp(0, lines - 1));
-///     scrolled.get() != before
+///     let mut line = scrolled.get();
+///     let moved = step.scroll(Axis::Vertical, &mut line, lines - 1);
+///     scrolled.set(line);
+///     moved
 /// })?;
 ///
 /// terminal.draw_web(move |frame| {
