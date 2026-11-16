@@ -9,44 +9,56 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use web_sys::{AddEventListenerOptions, Element, EventTarget, HtmlElement, TouchEvent, WheelEvent};
 
-use crate::{Gestures, Step};
+use ratatui_core::layout::Rect;
+
+use crate::{Gestures, Scroll};
 
 /// Starts following the wheel and touches over the view drawn in `screen`,
-/// with cells `cell` CSS pixels wide and tall, handing each [`Step`] to
-/// `step`, which carries it out and returns whether it moved. The view takes
-/// these events over from the browser's own scrolling, setting `screen`'s
-/// `touch-action` to `none` so the browser doesn't pan or zoom with its
-/// touches first, and follows them for as long as the page lives, so call
-/// it once.
+/// with cells `cell` CSS pixels wide and tall, scrolling `scroll`. Its area
+/// is the whole view's, as many cells as fit in `screen`, like the frame's
+/// when it's drawn.
+///
+/// The view takes these events over from the browser's own scrolling,
+/// setting `screen`'s `touch-action` to `none` so the browser doesn't pan or
+/// zoom with its touches first, and follows them for as long as the page
+/// lives, so call it once.
 ///
 /// With [Ratzilla], what's scrolled is shared between drawing and
 /// scrolling, and the backend measures its cells:
 ///
 /// ```ignore
-/// use std::{cell::Cell, rc::Rc};
+/// use std::{cell::RefCell, rc::Rc};
 ///
-/// use ratjest::Axis;
+/// use ratjest::{Axis, Scroll, Step};
 /// use ratzilla::ratatui::Terminal;
+/// use ratzilla::ratatui::layout::Rect;
 /// use ratzilla::ratatui::widgets::Paragraph;
 /// use ratzilla::{CellSized, DomBackend, WebRenderer};
 ///
-/// // The line at the top of the view, of `lines` in all.
-/// let top = Rc::new(Cell::new(0));
+/// /// Some text, and the line at the top of the view.
+/// struct Text {
+///     lines: Vec<String>,
+///     top: usize,
+/// }
+///
+/// impl Scroll for Text {
+///     fn scroll(&mut self, step: Step, area: Rect) -> bool {
+///         let last = self.lines.len().saturating_sub(usize::from(area.height));
+///         step.is_over(area) && step.scroll(Axis::Vertical, &mut self.top, last)
+///     }
+/// }
+///
+/// let text = Rc::new(RefCell::new(Text { lines, top: 0 }));
 /// let terminal = Terminal::new(DomBackend::new_by_element(screen.clone())?)?;
 ///
 /// let (width, height) = terminal.backend().cell_size_css_px();
 /// let cell = (f64::from(width), f64::from(height));
-/// let scrolled = top.clone();
-/// ratjest::web::listen(&screen, cell, move |step| {
-///     let mut line = scrolled.get();
-///     let moved = step.scroll(Axis::Vertical, &mut line, lines - 1);
-///     scrolled.set(line);
-///     moved
-/// })?;
+/// ratjest::web::listen(&screen, cell, text.clone())?;
 ///
 /// terminal.draw_web(move |frame| {
-///     let text = Paragraph::new(text.clone()).scroll((top.get() as u16, 0));
-///     frame.render_widget(text, frame.area());
+///     let text = text.borrow();
+///     let lines = Paragraph::new(text.lines.join("\n")).scroll((text.top as u16, 0));
+///     frame.render_widget(lines, frame.area());
 /// });
 /// ```
 ///
@@ -54,16 +66,16 @@ use crate::{Gestures, Step};
 pub fn listen(
     screen: &Element,
     cell: (f64, f64),
-    step: impl FnMut(Step) -> bool + 'static,
+    scroll: impl Scroll + 'static,
 ) -> Result<(), JsValue> {
     if let Some(screen) = screen.dyn_ref::<HtmlElement>() {
         screen.style().set_property("touch-action", "none")?;
     }
     let listener = Rc::new(RefCell::new(Listener {
         gestures: Gestures::new(cell.0, cell.1),
-        step: Box::new(step),
+        scroll: Box::new(scroll),
         screen: screen.clone(),
-        line: cell.1,
+        cell,
         gliding: false,
     }));
     listen_wheel(&listener)?;
@@ -74,25 +86,44 @@ type Shared = Rc<RefCell<Listener>>;
 
 struct Listener {
     gestures: Gestures,
-    step: Box<dyn FnMut(Step) -> bool>,
+    scroll: Box<dyn Scroll>,
     screen: Element,
-    /// How tall a line is, in pixels, for wheels that go by lines.
-    line: f64,
+    /// How wide and tall a cell is, in pixels.
+    cell: (f64, f64),
     /// Whether an animation frame is waiting to keep a flick going.
     gliding: bool,
 }
 
 impl Listener {
-    /// Where `x`, `y` pixels in the window are in the view.
+    /// The view's area, as many cells as fit in the screen.
+    fn area(&self) -> Rect {
+        let rect = self.screen.get_bounding_client_rect();
+        let cells = |pixels: f64, size: f64| (pixels / size).max(0.0) as u16;
+        Rect::new(
+            0,
+            0,
+            cells(rect.width(), self.cell.0),
+            cells(rect.height(), self.cell.1),
+        )
+    }
+
+    /// Where `x`, `y` pixels in the window are in the view. The part of a
+    /// cell left over at the screen's far edges counts as its last cell, so
+    /// a gesture there is still over the view.
     fn in_view(&self, x: i32, y: i32) -> (f64, f64) {
         let rect = self.screen.get_bounding_client_rect();
-        (f64::from(x) - rect.left(), f64::from(y) - rect.top())
+        let area = self.area();
+        let last = |cells: u16, size: f64| (f64::from(cells) * size - 1.0).max(0.0);
+        (
+            (f64::from(x) - rect.left()).min(last(area.width, self.cell.0)),
+            (f64::from(y) - rect.top()).min(last(area.height, self.cell.1)),
+        )
     }
 
     /// How far a wheel event goes, sideways and down, in pixels.
     fn wheel_pixels(&self, e: &WheelEvent) -> (f64, f64) {
         let pixels = |delta: f64| match e.delta_mode() {
-            WheelEvent::DOM_DELTA_LINE => delta * self.line,
+            WheelEvent::DOM_DELTA_LINE => delta * self.cell.1,
             WheelEvent::DOM_DELTA_PAGE => delta * f64::from(self.screen.client_height()),
             _ => delta,
         };
@@ -107,8 +138,11 @@ fn listen_wheel(listener: &Shared) -> Result<(), JsValue> {
         let listener = &mut *shared.borrow_mut();
         let at = listener.in_view(e.client_x(), e.client_y());
         let delta = listener.wheel_pixels(&e);
-        let step = &mut listener.step;
-        listener.gestures.wheel(at, delta, e.time_stamp(), step);
+        let area = listener.area();
+        let scroll = &mut *listener.scroll;
+        listener
+            .gestures
+            .wheel(at, delta, e.time_stamp(), scroll, area);
     });
     listener
         .borrow()
@@ -131,8 +165,11 @@ fn listen_touches(listener: &Shared) -> Result<(), JsValue> {
         let Some(at) = first_touch(listener, &e) else {
             return;
         };
-        let step = &mut listener.step;
-        listener.gestures.touch_move(at, e.time_stamp(), step);
+        let area = listener.area();
+        let scroll = &mut *listener.scroll;
+        listener
+            .gestures
+            .touch_move(at, e.time_stamp(), scroll, area);
     })
     .into_js_value();
 
@@ -190,8 +227,9 @@ fn glide(shared: Shared) {
     let frame = Closure::once_into_js(move |now: f64| {
         let more = {
             let listener = &mut *looping.borrow_mut();
-            let step = &mut listener.step;
-            let more = listener.gestures.glide(now, step);
+            let area = listener.area();
+            let scroll = &mut *listener.scroll;
+            let more = listener.gestures.glide(now, scroll, area);
             listener.gliding = more;
             more
         };

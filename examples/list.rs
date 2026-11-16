@@ -6,6 +6,10 @@
 //! the first item drawn. The list on the right keeps its selected item in
 //! view, whatever its offset, so there the wheel moves the selection, like
 //! `↑` and `↓` do. `q` quits.
+//!
+//! Each `ListState` is a [`Scroll`], and so are the two together, [`Lists`],
+//! which is what the wheel scrolls. It lays the lists out to scroll them
+//! the same way it does to draw them.
 
 use std::io;
 
@@ -19,7 +23,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, List, ListState};
 use ratatui::{DefaultTerminal, Frame};
 use ratjest::terminal::Wheel;
-use ratjest::{Axis, Step};
+use ratjest::{Scroll, Step};
 
 /// How many items each list has.
 const ITEMS: usize = 100;
@@ -47,16 +51,14 @@ impl App {
             wheel: Wheel::new(WHEEL),
             lists: Lists {
                 offset: ListState::default(),
-                offset_area: Rect::default(),
                 selection: ListState::default().with_selected(Some(0)),
-                selection_area: Rect::default(),
             },
         }
     }
 
     fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
         loop {
-            terminal.draw(|frame| self.lists.draw(frame))?;
+            let area = terminal.draw(|frame| self.lists.draw(frame))?.area;
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                     KeyCode::Char('q') => return Ok(()),
@@ -64,15 +66,15 @@ impl App {
                     KeyCode::Up => self.lists.selection.select_previous(),
                     _ => {}
                 },
-                Event::Mouse(mouse) => self.mouse(mouse),
+                Event::Mouse(mouse) => self.mouse(mouse, area),
                 _ => {}
             }
         }
     }
 
     /// Hands the wheel's ticks to the gesture, which keeps a swipe going one
-    /// way, and each of its steps to the lists.
-    fn mouse(&mut self, mouse: MouseEvent) {
+    /// way, and scrolls the lists, drawn in `area`.
+    fn mouse(&mut self, mouse: MouseEvent, area: Rect) {
         let ticks = match mouse.kind {
             MouseEventKind::ScrollDown => (0, 1),
             MouseEventKind::ScrollUp => (0, -1),
@@ -80,56 +82,47 @@ impl App {
             MouseEventKind::ScrollLeft => (-1, 0),
             _ => return,
         };
-        let lists = &mut self.lists;
         self.wheel
-            .tick(mouse.column, mouse.row, ticks, |step| lists.step(step));
+            .tick(mouse.column, mouse.row, ticks, &mut self.lists, area);
     }
 }
 
-/// The two lists' states, and where each list's items were last drawn.
+/// The two lists' states.
 struct Lists {
     /// Nothing selected, scrolled by its offset.
     offset: ListState,
-    offset_area: Rect,
     /// An item selected, scrolled by moving the selection.
     selection: ListState,
-    selection_area: Rect,
+}
+
+impl Scroll for Lists {
+    /// Scrolls whichever list the step is over.
+    fn scroll(&mut self, step: Step, area: Rect) -> bool {
+        let [left, right] = Self::layout(area);
+        let block = Block::bordered();
+        self.offset.scroll(step, block.inner(left))
+            || self.selection.scroll(step, block.inner(right))
+    }
 }
 
 impl Lists {
-    /// Carries out a step on the list it's over, and returns whether it
-    /// moved. Neither list moves sideways, so a sideways step doesn't.
-    fn step(&mut self, step: Step) -> bool {
-        let over = (step.column, step.row).into();
-        if self.offset_area.contains(over) {
-            // The last offset puts the last item on the bottom row.
-            let last = ITEMS.saturating_sub(usize::from(self.offset_area.height));
-            step.scroll(Axis::Vertical, self.offset.offset_mut(), last)
-        } else if self.selection_area.contains(over) {
-            let mut selected = self.selection.selected().unwrap_or(0);
-            let moved = step.scroll(Axis::Vertical, &mut selected, ITEMS - 1);
-            self.selection.select(Some(selected));
-            moved
-        } else {
-            false
-        }
-    }
-
     fn draw(&mut self, frame: &mut Frame) {
-        let [left, right] =
-            Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).areas(frame.area());
+        let [left, right] = Self::layout(frame.area());
 
         let block = Block::bordered().title(" Offset ");
-        self.offset_area = block.inner(left);
         let list = List::new(items()).block(block);
         frame.render_stateful_widget(list, left, &mut self.offset);
 
         let block = Block::bordered().title(" Selection ");
-        self.selection_area = block.inner(right);
         let list = List::new(items())
             .block(block)
             .highlight_style(Style::new().add_modifier(Modifier::REVERSED));
         frame.render_stateful_widget(list, right, &mut self.selection);
+    }
+
+    /// Where the two lists go in `area`, side by side.
+    fn layout(area: Rect) -> [Rect; 2] {
+        Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).areas(area)
     }
 }
 

@@ -37,15 +37,14 @@ jobs:
       # The `web` feature, where it runs.
       - run: cargo build --all-features --target wasm32-unknown-unknown
 
-  # The `rust-version` in Cargo.toml. Only the library is built, since the
-  # Ratatui in the documentation's examples needs a newer Rust.
+  # The `rust-version` in Cargo.toml, which is Ratatui's.
   msrv:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.85"
+          toolchain: "1.88"
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --all-features

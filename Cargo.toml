@@ -2,8 +2,8 @@
 name = "ratjest"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
-description = "Scroll gestures for terminal UIs, a cell at a time, from wheels, trackpads and touch"
+rust-version = "1.88"
+description = "Scroll gestures for Ratatui apps, a cell at a time, from wheels, trackpads and touch"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/nixpulvis/ratjest"
 keywords = ["gesture", "scroll", "ratatui", "tui", "wasm"]
@@ -19,12 +19,14 @@ default = []
 web = ["dep:wasm-bindgen", "dep:web-sys"]
 
 [dependencies]
+# The area a `Scroll` is drawn in, and the list and table states that are one.
+ratatui-core = { version = "0.1", default-features = false }
+ratatui-widgets = { version = "0.3", default-features = false }
 wasm-bindgen = { version = "0.2", optional = true }
 web-sys = { version = "0.3", optional = true, features = ["AddEventListenerOptions", "CssStyleDeclaration", "DomRect", "Element", "EventTarget", "HtmlElement", "Touch", "TouchEvent", "TouchList", "WheelEvent", "Window"] }
 
 [dev-dependencies]
 # Its wheel events, in `terminal::Wheel`'s example.
 crossterm = { version = "0.29", default-features = false, features = ["events"] }
-# Its list and table states, in `Step::scroll`'s examples, and what the
-# examples draw with.
+# What the examples draw with.
 ratatui = "0.30"

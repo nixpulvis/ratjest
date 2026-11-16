@@ -1094,6 +1094,8 @@ version = "0.1.0"
 dependencies = [
  "crossterm",
  "ratatui",
+ "ratatui-core",
+ "ratatui-widgets",
  "wasm-bindgen",
  "web-sys",
 ]
